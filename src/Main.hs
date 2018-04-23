@@ -3,22 +3,23 @@
 
 module Main where
 
-import           Control.Monad           (unless, join)
-import           Data.Aeson              ((.:), (.=))
-import qualified Data.Aeson              as A
-import qualified Data.Aeson.Types        as A
-import qualified Data.ByteString         as B
-import qualified Data.ByteString.Lazy    as BL
-import           Data.Semigroup          ((<>))
-import qualified Data.Text               as T
+import           Control.Concurrent.Async (async, wait)
+import           Control.Monad            (unless, replicateM)
+import           Data.Aeson               ((.:), (.=))
+import qualified Data.Aeson               as A
+import qualified Data.Aeson.Types         as A
+import qualified Data.ByteString          as B
+import qualified Data.ByteString.Lazy     as BL
+import           Data.Semigroup           ((<>))
+import qualified Data.Text                as T
 import           GHC.Generics
-import           Network.HTTP.Client     (Manager, newManager)
-import qualified Network.HTTP.Client     as NC
-import           Network.HTTP.Client.TLS (tlsManagerSettings)
+import           Network.HTTP.Client      (Manager, newManager)
+import qualified Network.HTTP.Client      as NC
+import           Network.HTTP.Client.TLS  (tlsManagerSettings)
 import           Options.Applicative
 import           Pipes
-import qualified Pipes.Prelude           as P
-import           System.IO               (isEOF)
+import qualified Pipes.Concurrent         as P
+import           System.IO                (isEOF)
 
 
 data Args = Args
@@ -52,46 +53,53 @@ fromStdin = do
   eof <- lift isEOF
   unless eof $ do
     line <- lift $ BL.fromStrict <$> B.getLine
-    yield line
-    fromStdin
+    if line == "QUIT"
+      then pure ()
+      else do
+        yield line
+        fromStdin
 
 
 data Query = Query
   { stmt :: T.Text
-  , args :: [A.Value] }
+  , args :: [A.Value]
+  , mode :: T.Text }
   deriving (Generic, Show)
 
 instance A.FromJSON Query
 
 
-parseQuery :: Monad m => Pipe BL.ByteString (Maybe Query) m ()
+parseQuery :: Monad m => Pipe BL.ByteString Query m ()
 parseQuery = do
   line <- await
-  yield (A.decode line)
-  parseQuery
+  case (A.eitherDecode line :: Either String Query) of
+    Left msg    -> error $ "Invalid query input: " <> msg
+    Right query -> do
+      yield query
+      parseQuery
 
 
-execQuery :: String -> Manager -> Pipe (Maybe Query) Double IO ()
+execQuery :: String -> Manager -> Pipe Query Double IO ()
 execQuery host manager = do
-  maybeQuery <- await
-  case maybeQuery of
+  query <- await
+  respBody <- lift $ sendQuery query
+  case getDuration respBody of
     Nothing -> execQuery host manager
-    Just query -> do
-      respBody <- lift $ sendQuery query
-      case getDuration respBody of
-        Nothing -> execQuery host manager
-        Just duration -> do
-          yield duration
-          execQuery host manager
+    Just duration -> do
+      yield duration
+      execQuery host manager
   where
     getDuration :: BL.ByteString -> Maybe Double
     getDuration resp = A.decode resp >>= A.parseMaybe (.: "duration")
     sendQuery query = do
       initReq <- NC.parseRequest ("http://" <> host <> "/_sql")
       let
-        reqObj = A.object
-          [ "stmt" .= stmt query
-          , "args" .= args query ]
+        reqObj = case mode query of
+          "single" -> A.object [ "stmt" .= stmt query
+                               , "args" .= args query ]
+          "bulk"   -> A.object [ "stmt" .= stmt query
+                               , "bulk_args" .= args query ]
+          m        -> error $ "Invalid query mode" <> show m
         body = NC.RequestBodyBS (BL.toStrict $ A.encode reqObj)
         req = initReq 
           { NC.method = "POST"
@@ -112,8 +120,14 @@ main = do
   args <- execParser parser
   manager <- newManager tlsManagerSettings
   let
-    queries :: Producer (Maybe Query) IO ()
+    queries :: Producer Query IO ()
     queries = fromStdin >-> parseQuery
-    results :: Producer Double IO ()
-    results = queries >-> execQuery (hosts args) manager
-  runEffect $ for results (lift . print)
+    runQueries = execQuery (hosts args) manager
+    processQueries = for runQueries (lift . print)
+  (output, input) <- P.spawn (P.bounded (concurrency args * 2))
+  workers <- replicateM (concurrency args) $
+    async $ do runEffect $ P.fromInput input >-> processQueries
+               P.performGC
+  producer <- async $ do runEffect $ queries >-> P.toOutput output
+                         P.performGC
+  mapM_ wait (producer:workers)
