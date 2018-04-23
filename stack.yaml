@@ -1,0 +1,9 @@
+resolver: lts-11.6
+
+
+ghc-options:
+  "$everything": -O2 -W -Werror -threaded -rtsopts -with-rtsopts=-N
+
+
+packages:
+- .
