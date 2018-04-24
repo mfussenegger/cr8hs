@@ -2,7 +2,7 @@ resolver: lts-11.6
 
 
 ghc-options:
-  "$everything": -O2 -W -Werror -threaded -rtsopts -with-rtsopts=-N
+  "$everything": -O2 -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -threaded -rtsopts -with-rtsopts=-N
 
 
 packages:

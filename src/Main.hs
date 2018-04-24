@@ -111,16 +111,16 @@ execQuery url manager = do
 
 main :: IO ()
 main = do
-  args <- execParser parser
+  cliArgs <- execParser parser
   manager <- newManager tlsManagerSettings
   let
-    url = "http://" <> hosts args <> "/_sql"
+    url = "http://" <> hosts cliArgs <> "/_sql"
     queries :: Producer Query IO ()
     queries = fromStdin >-> parseQuery
     runQueries = execQuery url manager
     processQueries = for runQueries (lift . print)
-  (output, input) <- P.spawn (P.bounded (concurrency args * 2))
-  workers <- replicateM (concurrency args) $
+  (output, input) <- P.spawn (P.bounded (concurrency cliArgs * 2))
+  workers <- replicateM (concurrency cliArgs) $
     async $ do runEffect $ P.fromInput input >-> processQueries
                P.performGC
   producer <- async $ do runEffect $ queries >-> P.toOutput output
