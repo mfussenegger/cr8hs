@@ -100,7 +100,7 @@ execQuery url manager = do
           "bulk"   -> A.object [ "stmt" .= stmt query
                                , "bulk_args" .= args query ]
           m        -> error $ "Invalid query mode" <> show m
-        body = NC.RequestBodyBS (BL.toStrict $ A.encode reqObj)
+        body = NC.RequestBodyLBS (A.encode reqObj)
         req = initReq 
           { NC.method = "POST"
           , NC.requestBody = body
@@ -113,6 +113,8 @@ main :: IO ()
 main = do
   cliArgs <- execParser parser
   manager <- newManager tlsManagerSettings
+    { NC.managerConnCount = concurrency cliArgs
+    , NC.managerResponseTimeout = NC.responseTimeoutNone }
   let
     url = "http://" <> hosts cliArgs <> "/_sql"
     execQuery' = execQuery url manager
