@@ -48,11 +48,11 @@ parser = parserInfo
         <> value 1 )
 
 
-fromStdin :: Producer BL.ByteString IO ()
+fromStdin :: Producer B.ByteString IO ()
 fromStdin = do
   eof <- lift isEOF
   unless eof $ do
-    line <- lift $ BL.fromStrict <$> B.getLine
+    line <- lift B.getLine
     if line == "QUIT"
       then pure ()
       else do
@@ -69,10 +69,10 @@ data Query = Query
 instance A.FromJSON Query
 
 
-parseQuery :: Monad m => Pipe BL.ByteString Query m ()
+parseQuery :: Monad m => Pipe B.ByteString Query m ()
 parseQuery = do
   line <- await
-  case (A.eitherDecode line :: Either String Query) of
+  case (A.eitherDecodeStrict line :: Either String Query) of
     Left msg    -> error $ "Invalid query input: " <> msg
     Right query -> do
       yield query
