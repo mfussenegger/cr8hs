@@ -115,14 +115,13 @@ main = do
   manager <- newManager tlsManagerSettings
   let
     url = "http://" <> hosts cliArgs <> "/_sql"
-    queries :: Producer Query IO ()
-    queries = fromStdin >-> parseQuery
-    runQueries = execQuery url manager
-    processQueries = for runQueries (lift . print)
-  (output, input) <- P.spawn (P.bounded (concurrency cliArgs * 2))
-  workers <- replicateM (concurrency cliArgs) $
-    async $ do runEffect $ P.fromInput input >-> processQueries
+    execQuery' = execQuery url manager
+    concurrency' = concurrency cliArgs
+    processQueries = for execQuery' (lift . print)
+  (output, input) <- P.spawn (P.bounded (concurrency' * 2))
+  workers <- replicateM concurrency' $
+    async $ do runEffect $ P.fromInput input >-> parseQuery >-> processQueries
                P.performGC
-  producer <- async $ do runEffect $ queries >-> P.toOutput output
+  producer <- async $ do runEffect $ fromStdin >-> P.toOutput output
                          P.performGC
   mapM_ wait (producer:workers)
