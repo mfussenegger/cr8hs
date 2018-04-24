@@ -84,7 +84,7 @@ execQuery host manager = do
   query <- await
   respBody <- lift $ sendQuery query
   case getDuration respBody of
-    Nothing -> execQuery host manager
+    Nothing -> error $ "duration missing in responseBody: " <> show respBody
     Just duration -> do
       yield duration
       execQuery host manager
