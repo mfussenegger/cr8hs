@@ -109,12 +109,6 @@ execQuery host manager = do
       NC.responseBody <$> NC.httpLbs req manager
 
 
-printResult :: Consumer Double IO ()
-printResult = do
-  result <- await
-  lift $ print result
-
-
 main :: IO ()
 main = do
   args <- execParser parser
