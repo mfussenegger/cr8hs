@@ -80,19 +80,19 @@ parseQuery = do
 
 
 execQuery :: String -> Manager -> Pipe Query Double IO ()
-execQuery host manager = do
+execQuery url manager = do
   query <- await
   respBody <- lift $ sendQuery query
   case getDuration respBody of
     Nothing -> error $ "duration missing in responseBody: " <> show respBody
     Just duration -> do
       yield duration
-      execQuery host manager
+      execQuery url manager
   where
     getDuration :: BL.ByteString -> Maybe Double
     getDuration resp = A.decode resp >>= A.parseMaybe (.: "duration")
     sendQuery query = do
-      initReq <- NC.parseRequest ("http://" <> host <> "/_sql")
+      initReq <- NC.parseRequest url
       let
         reqObj = case mode query of
           "single" -> A.object [ "stmt" .= stmt query
@@ -114,9 +114,10 @@ main = do
   args <- execParser parser
   manager <- newManager tlsManagerSettings
   let
+    url = "http://" <> hosts args <> "/_sql"
     queries :: Producer Query IO ()
     queries = fromStdin >-> parseQuery
-    runQueries = execQuery (hosts args) manager
+    runQueries = execQuery url manager
     processQueries = for runQueries (lift . print)
   (output, input) <- P.spawn (P.bounded (concurrency args * 2))
   workers <- replicateM (concurrency args) $
