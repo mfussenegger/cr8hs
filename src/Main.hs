@@ -53,11 +53,8 @@ fromStdin = do
   eof <- lift isEOF
   unless eof $ do
     line <- lift B.getLine
-    if line == "QUIT"
-      then pure ()
-      else do
-        yield line
-        fromStdin
+    yield line
+    fromStdin
 
 
 data Query = Query
@@ -120,10 +117,12 @@ main = do
     execQuery' = execQuery url manager
     concurrency' = concurrency cliArgs
     processQueries = for execQuery' (lift . print)
-  (output, input) <- P.spawn (P.bounded (concurrency' * 2))
-  workers <- replicateM concurrency' $
-    async $ do runEffect $ P.fromInput input >-> parseQuery >-> processQueries
-               P.performGC
-  producer <- async $ do runEffect $ fromStdin >-> P.toOutput output
-                         P.performGC
+    buffer = P.bounded (concurrency' * 2)
+  (output, input, seal) <- P.spawn' buffer
+  workers <- replicateM concurrency' $ async $ do
+    runEffect $ P.fromInput input >-> parseQuery >-> processQueries
+    P.atomically seal
+  producer <- async $ do
+    runEffect $ fromStdin >-> P.toOutput output
+    P.atomically seal
   mapM_ wait (producer:workers)
